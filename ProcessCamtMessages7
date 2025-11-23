@@ -1,0 +1,104 @@
+Option Explicit
+Sub ProcessCamtMessages7()
+    Dim ws1 As Worksheet, ws2 As Worksheet
+    Dim lastRow As Long, i As Long, outRow As Long
+    Dim responder As String, sender As String, format As String
+    Dim dictSenders As Object
+    Dim dictResponders As Object
+    Dim dictFormats As Object
+    Dim arrSenders As Variant
+    Dim baseFormat As String
+    
+    Set ws1 = ThisWorkbook.Sheets("Sheet1")
+    Set ws2 = ThisWorkbook.Sheets("Sheet2")
+    
+    ' Wyczyść Sheet2
+    ws2.Cells.ClearContents
+    ws2.Range("A1:E1").Value = Array("Client", "Recipient DN", "Sender", "Format", "Message Count")
+    
+    lastRow = ws1.Cells(ws1.Rows.Count, "A").End(xlUp).Row
+    
+    Set dictResponders = CreateObject("Scripting.Dictionary")
+    
+    ' --- ZBIERAMY DANE TYLKO Z formatów camt.053 i camt.054 ---
+    For i = 2 To lastRow
+        ' POPRAWKA: Format jest w kolumnie D, nie C!
+        format = Trim(ws1.Cells(i, "D").Value)
+        
+        ' Filtr - sprawdzamy czy format zaczyna się od camt.053 lub camt.054
+        If InStr(1, format, "camt.053", vbTextCompare) = 1 _
+           Or InStr(1, format, "camt.054", vbTextCompare) = 1 Then
+            
+            responder = Trim(ws1.Cells(i, "B").Value) ' Responder (kolumna B)
+            sender = Trim(ws1.Cells(i, "C").Value)    ' Requestor (kolumna C)
+            
+            If responder <> "" Then
+            
+                ' Określamy baseFormat dla tego wiersza
+                If InStr(1, format, "camt.053", vbTextCompare) = 1 Then
+                    baseFormat = "camt.053"
+                Else
+                    baseFormat = "camt.054"
+                End If
+                
+                ' Jeśli pierwszy raz widzimy respondenta › tworzymy rekord
+                If Not dictResponders.Exists(responder) Then
+                    Set dictSenders = CreateObject("Scripting.Dictionary")
+                    dictSenders(sender) = 1
+                    
+                    ' Tworzymy Dictionary dla formatów (żeby były unikalne)
+                    Set dictFormats = CreateObject("Scripting.Dictionary")
+                    dictFormats(baseFormat) = 1
+                    
+                    ' Przechowujemy: SenderList + Formats + MessageCount
+                    Set dictResponders(responder) = CreateObject("Scripting.Dictionary")
+                    Set dictResponders(responder)("Senders") = dictSenders
+                    Set dictResponders(responder)("Formats") = dictFormats
+                    dictResponders(responder)("Count") = 1
+                    
+                Else
+                    ' Jeśli Responder już istnieje › dopisujemy unikalnego Sendera
+                    Set dictSenders = dictResponders(responder)("Senders")
+                    dictSenders(sender) = 1
+                    
+                    ' Dopisujemy unikalny Format
+                    Set dictFormats = dictResponders(responder)("Formats")
+                    dictFormats(baseFormat) = 1
+                    
+                    ' Zwiększamy licznik wiadomości
+                    dictResponders(responder)("Count") = dictResponders(responder)("Count") + 1
+                End If
+            End If
+        End If
+    Next i
+    
+    
+    ' --- ZAPIS DO SHEET2 ---
+    outRow = 2
+    Dim key As Variant
+    Dim arrFormats As Variant
+    
+    For Each key In dictResponders.Keys
+        
+        ' Recipient DN (kolumna B w Sheet2)
+        ws2.Cells(outRow, "B").Value = key
+        
+        ' Sender list (unikalne, linia po linii)
+        arrSenders = dictResponders(key)("Senders").Keys
+        ws2.Cells(outRow, "C").Value = Join(arrSenders, vbCrLf)
+        ws2.Cells(outRow, "C").WrapText = True
+        
+        ' Format list (unikalne, linia po linii - camt.053 i/lub camt.054)
+        arrFormats = dictResponders(key)("Formats").Keys
+        ws2.Cells(outRow, "D").Value = Join(arrFormats, vbCrLf)
+        ws2.Cells(outRow, "D").WrapText = True
+        
+        ' Message Count (liczba wiadomości dla tego Respondera)
+        ws2.Cells(outRow, "E").Value = dictResponders(key)("Count")
+        
+        outRow = outRow + 1
+    Next key
+    
+    MsgBox "Finished processing camt.053 / camt.054. Found " & dictResponders.Count & " responders.", vbInformation
+End Sub
+
